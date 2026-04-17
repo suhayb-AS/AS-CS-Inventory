@@ -63,6 +63,7 @@
             font-size: 0.85rem; text-transform: uppercase;
             letter-spacing: 0.5px; color: #9ca3af; cursor: pointer;
         }
+        th:hover { background: rgba(255,255,255,0.08); }
         tr { border-bottom: 1px solid rgba(255,255,255,0.05); }
         tr:hover { background: rgba(255,255,255,0.03); }
         .stock-badge { padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
@@ -71,22 +72,18 @@
         .stock-critical { background: rgba(239, 68, 68, 0.2); color: #f87171; }
         .stock-out { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
         .actions { display: flex; gap: 8px; }
-        .btn-icon {
-            width: 32px; height: 32px; border: none; border-radius: 6px;
-            cursor: pointer; display: flex; align-items: center;
-            justify-content: center;
-        }
+        .btn-icon { width: 32px; height: 32px; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         .btn-edit { background: rgba(59,130,246,0.2); color:#60a5fa; }
         .btn-delete { background: rgba(239,68,68,0.2); color:#f87171; }
-        .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); }
-        .modal-overlay.active { display:flex; align-items:center; justify-content:center; }
-        .modal { background:#1e293b; border-radius:16px; width:100%; max-width:500px; }
+        .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center; }
+        .modal-overlay.active { display:flex; }
+        .modal { background:#1e293b; border-radius:16px; width:100%; max-width:500px; max-height:90vh; overflow-y:auto; }
         .modal-header, .modal-body, .modal-footer { padding:20px; }
         .form-group { margin-bottom:20px; }
-        .form-group input, .form-group textarea { width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); }
+        .form-group input, .form-group textarea, .form-group select { width:100%; padding:12px; border-radius:8px; background:rgba(255,255,255,0.05); color:#fff; border:1px solid rgba(255,255,255,0.1); }
         .form-row { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
         .empty-state { text-align:center; padding:60px 20px; color:#6b7280; }
-        .toast-container { position:fixed; bottom:20px; right:20px; }
+        .toast-container { position:fixed; bottom:20px; right:20px; z-index:2000; }
     </style>
 </head>
 <body>
@@ -94,6 +91,9 @@
 <header>
 <h1>📦 Inventory Manager</h1>
 <div class="header-actions">
+<button class="btn btn-secondary" onclick="exportData()">📥 Export CSV</button>
+<button class="btn btn-secondary" onclick="document.getElementById('importFile').click()">📤 Import CSV</button>
+<input type="file" id="importFile" accept=".csv" style="display:none" onchange="importData(event)">
 <button class="btn btn-primary" onclick="openModal()">+ Add Item</button>
 </div>
 </header>
@@ -101,35 +101,96 @@
 <div class="stats-grid">
 <div class="stat-card"><h3>Total Items</h3><div class="value" id="totalItems">0</div></div>
 <div class="stat-card"><h3>Total Value</h3><div class="value" id="totalValue">£0</div></div>
+<div class="stat-card warning"><h3>Low Stock</h3><div class="value" id="lowStock">0</div></div>
+<div class="stat-card danger"><h3>Out of Stock</h3><div class="value" id="outOfStock">0</div></div>
+</div>
+
+<div class="toolbar">
+<div class="search-box"><input type="text" id="searchInput" placeholder="Search items..." oninput="renderTable()"></div>
+<select id="categoryFilter" onchange="renderTable()"><option value="">All Categories</option></select>
+<select id="stockFilter" onchange="renderTable()">
+<option value="">All Stock Levels</option>
+<option value="ok">In Stock</option>
+<option value="low">Low Stock</option>
+<option value="critical">Critical</option>
+<option value="out">Out of Stock</option>
+</select>
 </div>
 
 <div class="table-container">
 <table>
-<thead><tr><th>SKU</th><th>Name</th><th>Qty</th><th>Price</th></tr></thead>
+<thead>
+<tr>
+<th onclick="sortTable('sku')">SKU ↕</th>
+<th onclick="sortTable('name')">Name ↕</th>
+<th>Category</th>
+<th onclick="sortTable('quantity')">Qty ↕</th>
+<th onclick="sortTable('price')">Price ↕</th>
+<th>Status</th>
+<th>Actions</th>
+</tr>
+</thead>
 <tbody id="inventoryTable"></tbody>
 </table>
+<div class="empty-state" id="emptyState" style="display:none;">
+<h3>No items found</h3>
+<p>Add your first inventory item to get started</p>
+</div>
 </div>
 </div>
 
 <script>
-let inventory = [];
+let inventory = JSON.parse(localStorage.getItem('inventory')) || [];
+let sortColumn = 'name';
+let sortDirection = 'asc';
 
 function renderTable() {
 const tbody = document.getElementById('inventoryTable');
-tbody.innerHTML = inventory.map(item => `
+const search = document.getElementById('searchInput').value.toLowerCase();
+
+let filtered = inventory.filter(item =>
+item.name.toLowerCase().includes(search) ||
+item.sku.toLowerCase().includes(search)
+);
+
+filtered.sort((a,b)=>{
+let aVal=a[sortColumn], bVal=b[sortColumn];
+if(aVal<bVal) return sortDirection==='asc'?-1:1;
+if(aVal>bVal) return sortDirection==='asc'?1:-1;
+return 0;
+});
+
+if(filtered.length===0){
+tbody.innerHTML='';
+document.getElementById('emptyState').style.display='block';
+return;
+}
+
+document.getElementById('emptyState').style.display='none';
+
+tbody.innerHTML = filtered.map(item=>`
 <tr>
 <td>${item.sku}</td>
 <td>${item.name}</td>
+<td>${item.category}</td>
 <td>${item.quantity}</td>
 <td>£${item.price.toFixed(2)}</td>
+<td>${item.quantity===0?'Out':'In Stock'}</td>
+<td></td>
 </tr>
 `).join('');
 }
 
-function updateStats() {
-document.getElementById('totalItems').textContent = inventory.length;
-const totalValue = inventory.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-document.getElementById('totalValue').textContent = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(totalValue);
+function sortTable(col){
+if(sortColumn===col){sortDirection=sortDirection==='asc'?'desc':'asc'}
+else{sortColumn=col;sortDirection='asc'}
+renderTable();
+}
+
+function updateStats(){
+document.getElementById('totalItems').textContent=inventory.length;
+const totalValue = inventory.reduce((sum,i)=>sum+(i.price*i.quantity),0);
+document.getElementById('totalValue').textContent = new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP'}).format(totalValue);
 }
 </script>
 </body>
